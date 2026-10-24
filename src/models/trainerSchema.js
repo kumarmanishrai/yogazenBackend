@@ -1,34 +1,75 @@
-
 const mongoose = require('mongoose');
 
-const trainerSchema = new mongoose.Schema({
-    name:{
-        type: String,
-        required: true,
+const trainerSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    role: {
+      type: String,
+      default: 'trainer'
     },
     email: {
-        type: String, 
-        unique: true,
-        required: true,
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true
     },
     password: {
-        type: String, 
-        required: true,
+      type: String,
+      required: true,
+      minlength: 6
     },
-    jwtToken: {
-        type: String,
-        unique: true,
+    contact: {
+      type: String,
+      trim: true
     },
-    contact:{
+    bio: {
+      type: String,
+      default: ''
+    },
+    // Categories/tags for filtering (e.g. Yoga, Meditation, Pranayama, Hatha)
+    categories: [
+      {
         type: String,
+        trim: true
+      }
+    ],
+    experienceYears: {
+      type: Number,
+      default: 0
+    },
+    isApproved: {
+      type: Boolean,
+      default: false // Admin approves trainer before their courses go public
+    },
+    // Payout details to receive course revenue
+    payoutDetails: {
+      accountHolderName: { type: String, trim: true },
+      accountNumber: { type: String, trim: true },
+      ifscCode: { type: String, trim: true },
+      upiId: { type: String, trim: true }
+    },
+    totalEarnings: {
+      type: Number,
+      default: 0
     },
     courses: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Course",
-        },
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Course'
+      }
+    ],
+    refreshTokens: [
+      {
+        type: String
+      }
     ]
-    
-})
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model("Trainer", trainerSchema);
+module.exports = mongoose.model('Trainer', trainerSchema);

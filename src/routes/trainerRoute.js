@@ -1,15 +1,26 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const isValidTrainer = require('../middleware/isValidTrainer')
+const trainerController = require('../controller/trainerController');
+const isValidTrainer = require('../middleware/isValidTrainer');
 
-// router.post('/register', trainerController.register);
-// router.post('/login', trainerController.login);
-// router.post('/login/pin', trainerController.loginPin);
-// router.get('/about',isValidUser, trainerController.about);
-// router.put('/about/email',isValidUser, trainerController.updateTrainerEmail);
-// router.put('/about/contact',isValidUser, trainerController.updateTrainerContact);
-// router.put('/password',isValidUser, trainerController.updatePassword);
-// router.put('/pin',isValidUser, trainerController.updatePin);
-// router.delete('/delete/profile', trainerController.deleteProfile)
+// --- Public Routes ---
+router.post('/register', trainerController.register);
+router.post('/login', trainerController.login);
+router.post('/refresh-token', trainerController.refreshToken);
+router.post('/logout', trainerController.logout);
+router.get('/public', trainerController.getPublicTrainers); // For user discovery & category filtering
+
+// --- Protected Trainer Profile & Earnings Routes ---
+router.get('/profile', isValidTrainer, trainerController.getProfile);
+router.put('/profile', isValidTrainer, trainerController.updateProfile);
+router.put('/password', isValidTrainer, trainerController.updatePassword);
+router.put('/payout-details', isValidTrainer, trainerController.updatePayoutDetails);
+router.get('/earnings', isValidTrainer, trainerController.getEarnings);
+
+// --- Protected Course Management Routes ---
+router.get('/courses', isValidTrainer, trainerController.getMyCourses);
+router.post('/courses', isValidTrainer, trainerController.createCourse);
+router.put('/courses/:id', isValidTrainer, trainerController.updateCourse);
+router.delete('/courses/:id', isValidTrainer, trainerController.deleteCourse);
 
 module.exports = router;

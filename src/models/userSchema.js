@@ -1,66 +1,72 @@
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
-    name:{
-        type: String,
+const addressSchema = new mongoose.Schema({
+  street: { type: String, required: true },
+  landmark: { type: String },
+  city: { type: String, required: true },
+  state: { type: String, required: true },
+  country: { type: String, default: 'India' },
+  pincode: { type: String, required: true },
+  contact: { type: String, required: true },
+  isDefault: { type: Boolean, default: false }
+});
+
+const enrolledCourseSchema = new mongoose.Schema({
+  course: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Course',
+    required: true
+  },
+  enrolledAt: {
+    type: Date,
+    default: Date.now
+  },
+  invoiceId: {
+    type: String,
+    required: true
+  },
+  amountPaid: {
+    type: Number,
+    required: true
+  }
+});
+
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      default: ''
     },
-    email:{
-        type: String,
-        unique: true,
-        required: true,
+    role: {
+      type: String,
+      default: 'user'
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true
     },
     password: {
-        type: String,
-        minlength: 6,
-        required: true,
+      type: String,
+      required: true,
+      minlength: 6
     },
-    jwtToken: {
-        type: String,
-        unique: true,
+    contact: {
+      type: String,
+      trim: true
     },
-    contact:{
-        type: String,
-    },
-    address:[
-        {
-            field1: {
-                type: String,
-                required: true,
-            },
-            field2: {
-                type: String,
-            },
-            landmark: {
-                type: String,
-            },
-            state:{
-                type: String,
-                required: true,
-            },
-            country: {
-                type: String,
-                required: true,
-            }, 
-            pincode: {
-                type: String,
-                required: true,
-            },
-            contact: {
-                type: String,
-                required: true,
-            },
-        }
-    ],
-    enrolledCourses: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            timestamp:{
-                type: Date,
-                default: Date.now,
-            },
-        }
-    ],
+    addresses: [addressSchema],
+    enrolledCourses: [enrolledCourseSchema],
+    refreshTokens: [
+      {
+        type: String
+      }
+    ]
+  },
+  { timestamps: true }
+);
 
-})
-
-module.exports = mongoose.model("User", userSchema)
+module.exports = mongoose.model('User', userSchema);
