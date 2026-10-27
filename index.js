@@ -10,6 +10,8 @@ const PORT = process.env.PORT || 5000;
 const userRoute = require('./src/routes/userRoute');
 const trainerRoute = require('./src/routes/trainerRoute');
 const adminRoute = require('./src/routes/adminRoute');
+const cartRoute = require('./src/routes/cartRoute');
+const wishlistRoute = require('./src/routes/wishlistRoute');
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -33,6 +35,14 @@ app.get('/check', (req, res) => {
 
 // User route
 app.use('/user', userRoute);
+
+// Cart routes
+app.use('/cart', cartRoute);
+app.use('/user/cart', cartRoute);
+
+// Wishlist routes
+app.use('/wishlist', wishlistRoute);
+app.use('/user/wishlist', wishlistRoute);
 
 // Trainer route
 app.use('/trainer', trainerRoute);
