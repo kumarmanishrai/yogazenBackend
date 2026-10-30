@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const Trainer = require('../models/trainerSchema');
+const Course = require('../models/courseSchema');
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -266,28 +267,186 @@ exports.getProfile = async (req, res) => {
   });
 };
 
+// @desc    Update trainer profile
+// @route   PUT /trainer/profile
+// @access  Protected (Trainer)
 exports.updateProfile = async (req, res) => {
-  res.status(501).json({ message: 'Update trainer profile endpoint not yet implemented' });
+  try {
+    const { name, contact, bio, experienceYears, categories } = req.body;
+    const trainer = req.trainer;
+
+    if (name !== undefined) trainer.name = name.trim();
+    if (contact !== undefined) trainer.contact = contact.trim();
+    if (bio !== undefined) trainer.bio = bio.trim();
+    if (experienceYears !== undefined) trainer.experienceYears = parseInt(experienceYears, 10) || 0;
+    if (Array.isArray(categories)) {
+      trainer.categories = categories.map((c) => (typeof c === 'string' ? c.trim() : '')).filter(Boolean);
+    }
+
+    await trainer.save();
+
+    const isProfileComplete = Boolean(
+      trainer.name &&
+      trainer.contact &&
+      trainer.bio &&
+      trainer.categories &&
+      trainer.categories.length > 0
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Trainer profile updated successfully',
+      trainer: {
+        id: trainer._id,
+        name: trainer.name,
+        email: trainer.email,
+        contact: trainer.contact,
+        bio: trainer.bio,
+        categories: trainer.categories,
+        experienceYears: trainer.experienceYears,
+        isApproved: trainer.isApproved,
+        payoutDetails: trainer.payoutDetails,
+        role: trainer.role,
+        isProfileComplete
+      }
+    });
+  } catch (error) {
+    console.error('Error updating trainer profile:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update trainer profile',
+      error: error.message
+    });
+  }
 };
 
 exports.updatePassword = async (req, res) => {
   res.status(501).json({ message: 'Update password endpoint not yet implemented' });
 };
 
+// @desc    Update trainer payout details
+// @route   PUT /trainer/payout-details
+// @access  Protected (Trainer)
 exports.updatePayoutDetails = async (req, res) => {
-  res.status(501).json({ message: 'Update payout details endpoint not yet implemented' });
+  try {
+    const { accountHolderName, accountNumber, ifscCode, upiId } = req.body;
+    const trainer = req.trainer;
+
+    trainer.payoutDetails = {
+      accountHolderName: (accountHolderName || '').trim(),
+      accountNumber: (accountNumber || '').trim(),
+      ifscCode: (ifscCode || '').trim(),
+      upiId: (upiId || '').trim()
+    };
+
+    await trainer.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payout & bank details saved successfully',
+      payoutDetails: trainer.payoutDetails
+    });
+  } catch (error) {
+    console.error('Error updating payout details:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update payout details',
+      error: error.message
+    });
+  }
 };
 
 exports.getEarnings = async (req, res) => {
-  res.status(501).json({ message: 'Get trainer earnings endpoint not yet implemented' });
+  return res.status(200).json({
+    success: true,
+    totalEarnings: req.trainer.totalEarnings || 0
+  });
 };
 
+// @desc    Get trainer's created courses
+// @route   GET /trainer/courses
+// @access  Protected (Trainer)
 exports.getMyCourses = async (req, res) => {
-  res.status(501).json({ message: 'Get trainer courses endpoint not yet implemented' });
+  try {
+    const courses = await Course.find({ trainer: req.trainer._id }).sort({ createdAt: -1 });
+    return res.status(200).json({
+      success: true,
+      count: courses.length,
+      courses
+    });
+  } catch (error) {
+    console.error('Error retrieving trainer courses:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve your courses',
+      error: error.message
+    });
+  }
 };
 
+// @desc    Create a new course (STRICT PROFILE COMPLETION GUARD)
+// @route   POST /trainer/courses
+// @access  Protected (Trainer)
 exports.createCourse = async (req, res) => {
-  res.status(501).json({ message: 'Create course endpoint not yet implemented' });
+  try {
+    const trainer = req.trainer;
+
+    // Strict Profile Completeness Check:
+    // Trainer must have entered their name, contact, bio, and at least one category
+    const isProfileComplete = Boolean(
+      trainer.name &&
+      trainer.name.trim() &&
+      trainer.contact &&
+      trainer.contact.trim() &&
+      trainer.bio &&
+      trainer.bio.trim() &&
+      trainer.categories &&
+      trainer.categories.length > 0
+    );
+
+    if (!isProfileComplete) {
+      return res.status(403).json({
+        success: false,
+        code: 'PROFILE_INCOMPLETE',
+        message: 'Action blocked: Please complete your trainer profile (name, contact number, bio, and teaching categories) before adding or publishing courses.'
+      });
+    }
+
+    const { title, description, category, level, price, classes } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Course title is required'
+      });
+    }
+
+    const newCourse = await Course.create({
+      trainer: trainer._id,
+      title: title.trim(),
+      description: (description || '').trim(),
+      category: (category || trainer.categories[0] || 'Hatha Yoga').trim(),
+      level: level || 'All Levels',
+      price: parseFloat(price) || 0,
+      classes: Array.isArray(classes) ? classes : []
+    });
+
+    trainer.courses.push(newCourse._id);
+    await trainer.save();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Course created successfully',
+      course: newCourse
+    });
+  } catch (error) {
+    console.error('Error creating course:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create course',
+      error: error.message
+    });
+  }
 };
 
 exports.updateCourse = async (req, res) => {

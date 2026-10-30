@@ -6,8 +6,28 @@ const Product = require('../models/productSchema');
 const formatCartItem = (item) => {
   const product = item.product;
   const requestedQty = Number(item.quantity) || 1;
-  const availableStock = product?.stock !== undefined ? Number(product.stock) : 0;
-  const isAvailable = product ? Boolean(product.isAvailable) : false;
+  const varietySku = (item.varietySku || '').trim();
+
+  // Find matching variety if SKU is present
+  const matchingVariety = varietySku && product?.varieties?.length
+    ? product.varieties.find((v) => v.sku === varietySku)
+    : null;
+
+  let availableStock = product?.stock !== undefined ? Number(product.stock) : 0;
+  let isAvailable = product ? Boolean(product.isAvailable) : false;
+  let basePrice = Number(product?.price) || 0;
+  let effectivePrice = Number(product?.discountPrice) > 0 ? Number(product.discountPrice) : basePrice;
+  let thumbnail = product?.thumbnail || product?.images?.[0] || '';
+  let varietyName = item.varietyName || '';
+
+  if (matchingVariety) {
+    availableStock = Number(matchingVariety.stock) || 0;
+    isAvailable = Boolean(matchingVariety.isAvailable && product.isAvailable);
+    basePrice = Number(matchingVariety.mrp) || basePrice;
+    effectivePrice = Number(matchingVariety.price) || effectivePrice;
+    if (matchingVariety.image) thumbnail = matchingVariety.image;
+    varietyName = matchingVariety.name;
+  }
 
   const isOutOfStock = !isAvailable || availableStock < 1;
   const isQuantityExceeded = !isOutOfStock && requestedQty > availableStock;
@@ -21,14 +41,17 @@ const formatCartItem = (item) => {
   } else if (isQuantityExceeded) {
     stockStatus = 'QUANTITY_EXCEEDED';
     statusMessage = `Only ${availableStock} unit${availableStock > 1 ? 's' : ''} left in stock (you requested ${requestedQty})`;
+  } else if (availableStock < 10) {
+    stockStatus = 'LOW_STOCK';
+    statusMessage = `Only ${availableStock} left in stock`;
   }
-
-  const basePrice = Number(product?.price) || 0;
-  const effectivePrice = Number(product?.discountPrice) > 0 ? Number(product.discountPrice) : basePrice;
 
   return {
     _id: item._id,
     product,
+    varietySku,
+    varietyName,
+    varietyImage: thumbnail,
     quantity: requestedQty,
     addedAt: item.addedAt,
     availableStock,
@@ -139,6 +162,8 @@ exports.addToCart = async (req, res) => {
   try {
     const productId = req.body.productId || req.body.id;
     const quantity = parseInt(req.body.quantity, 10) || 1;
+    const varietySku = (req.body.varietySku || '').trim();
+    const varietyName = (req.body.varietyName || '').trim();
 
     if (!productId) {
       return res.status(400).json({
@@ -170,11 +195,27 @@ exports.addToCart = async (req, res) => {
       });
     }
 
+    // Resolve specific variety if specified
+    let targetStock = product.stock;
+    let targetPrice = product.discountPrice || product.price;
+    let targetImage = product.thumbnail || product.images?.[0] || '';
+    let resolvedVarietyName = varietyName;
+
+    if (varietySku && product.varieties?.length) {
+      const vMatch = product.varieties.find((v) => v.sku === varietySku);
+      if (vMatch) {
+        targetStock = vMatch.stock;
+        targetPrice = vMatch.price || targetPrice;
+        if (vMatch.image) targetImage = vMatch.image;
+        resolvedVarietyName = vMatch.name;
+      }
+    }
+
     // Check inventory stock
-    if (product.stock < 1) {
+    if (targetStock < 1) {
       return res.status(400).json({
         success: false,
-        message: `Sorry, "${product.title}" is currently out of stock.`
+        message: `Sorry, "${product.title}${resolvedVarietyName ? ` - ${resolvedVarietyName}` : ''}" is currently out of stock.`
       });
     }
 
@@ -186,29 +227,33 @@ exports.addToCart = async (req, res) => {
       });
     }
 
-    // Check if item already exists in cart
+    // Check if item (with exact matching variety SKU) already exists in cart
     const existingIndex = user.cart.findIndex(
-      (item) => item.product.toString() === productId.toString()
+      (item) => item.product.toString() === productId.toString() && (item.varietySku || '') === varietySku
     );
 
     if (existingIndex > -1) {
       const newQuantity = user.cart[existingIndex].quantity + quantity;
-      if (newQuantity > product.stock) {
+      if (newQuantity > targetStock) {
         return res.status(400).json({
           success: false,
-          message: `Cannot add more. Only ${product.stock} units available in stock.`
+          message: `Cannot add more. Only ${targetStock} units available in stock.`
         });
       }
       user.cart[existingIndex].quantity = newQuantity;
     } else {
-      if (quantity > product.stock) {
+      if (quantity > targetStock) {
         return res.status(400).json({
           success: false,
-          message: `Only ${product.stock} units available in stock.`
+          message: `Only ${targetStock} units available in stock.`
         });
       }
       user.cart.push({
         product: productId,
+        varietySku,
+        varietyName: resolvedVarietyName,
+        varietyImage: targetImage,
+        unitPrice: targetPrice,
         quantity,
         addedAt: new Date()
       });
@@ -222,7 +267,7 @@ exports.addToCart = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `"${product.title}" added to your cart successfully`,
+      message: `"${product.title}${resolvedVarietyName ? ` (${resolvedVarietyName})` : ''}" added to your cart successfully`,
       cart: formattedCart,
       summary
     });

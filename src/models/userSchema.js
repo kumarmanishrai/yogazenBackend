@@ -37,6 +37,26 @@ const cartItemSchema = new mongoose.Schema({
     ref: 'Product',
     required: true
   },
+  varietySku: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  varietyName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  varietyImage: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  unitPrice: {
+    type: Number,
+    min: 0,
+    default: null
+  },
   quantity: {
     type: Number,
     required: true,

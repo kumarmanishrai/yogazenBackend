@@ -12,6 +12,10 @@ const trainerRoute = require('./src/routes/trainerRoute');
 const adminRoute = require('./src/routes/adminRoute');
 const cartRoute = require('./src/routes/cartRoute');
 const wishlistRoute = require('./src/routes/wishlistRoute');
+const productRoute = require('./src/routes/productRoute');
+const orderRoute = require('./src/routes/orderRoute');
+const complaintRoute = require('./src/routes/complaintRoute');
+const analyticsRoute = require('./src/routes/analyticsRoute');
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -43,6 +47,18 @@ app.use('/user/cart', cartRoute);
 // Wishlist routes
 app.use('/wishlist', wishlistRoute);
 app.use('/user/wishlist', wishlistRoute);
+
+// Products route (Public Store)
+app.use('/products', productRoute);
+
+// Orders route
+app.use('/orders', orderRoute);
+
+// Complaints & Support route
+app.use('/complaints', complaintRoute);
+
+// Telemetry & Recommendation Analytics route
+app.use('/analytics', analyticsRoute);
 
 // Trainer route
 app.use('/trainer', trainerRoute);

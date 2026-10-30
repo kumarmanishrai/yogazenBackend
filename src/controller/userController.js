@@ -259,24 +259,180 @@ exports.getProfile = async (req, res) => {
   });
 };
 
+// @desc    Update current user profile (name, contact)
+// @route   PUT /user/profile
+// @access  Protected
 exports.updateProfile = async (req, res) => {
-  res.status(501).json({ message: 'Update user profile endpoint not yet implemented' });
+  try {
+    const { name, contact } = req.body;
+    const user = req.user;
+
+    if (name !== undefined) user.name = name.trim();
+    if (contact !== undefined) user.contact = contact.trim();
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        contact: user.contact,
+        addresses: user.addresses,
+        enrolledCourses: user.enrolledCourses,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update profile',
+      error: error.message
+    });
+  }
 };
 
 exports.updatePassword = async (req, res) => {
   res.status(501).json({ message: 'Update password endpoint not yet implemented' });
 };
 
+// @desc    Add shipping address
+// @route   POST /user/address
+// @access  Protected
 exports.addAddress = async (req, res) => {
-  res.status(501).json({ message: 'Add address endpoint not yet implemented' });
+  try {
+    const { street, landmark, city, state, country, pincode, contact, isDefault } = req.body;
+    const user = req.user;
+
+    if (!street || !city || !state || !pincode || !contact) {
+      return res.status(400).json({
+        success: false,
+        message: 'Street, city, state, pincode, and contact phone are required'
+      });
+    }
+
+    // If marked default, unset default on other addresses
+    if (isDefault) {
+      user.addresses.forEach((addr) => {
+        addr.isDefault = false;
+      });
+    }
+
+    const newAddress = {
+      street: street.trim(),
+      landmark: (landmark || '').trim(),
+      city: city.trim(),
+      state: state.trim(),
+      country: (country || 'India').trim(),
+      pincode: pincode.trim(),
+      contact: contact.trim(),
+      isDefault: isDefault || user.addresses.length === 0
+    };
+
+    user.addresses.push(newAddress);
+    await user.save();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Address added successfully',
+      addresses: user.addresses
+    });
+  } catch (error) {
+    console.error('Error adding address:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to add address',
+      error: error.message
+    });
+  }
 };
 
+// @desc    Update shipping address
+// @route   PUT /user/address/:id
+// @access  Protected
 exports.updateAddress = async (req, res) => {
-  res.status(501).json({ message: 'Update address endpoint not yet implemented' });
+  try {
+    const { id } = req.params;
+    const { street, landmark, city, state, country, pincode, contact, isDefault } = req.body;
+    const user = req.user;
+
+    const address = user.addresses.id(id);
+    if (!address) {
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found'
+      });
+    }
+
+    if (isDefault) {
+      user.addresses.forEach((addr) => {
+        addr.isDefault = false;
+      });
+      address.isDefault = true;
+    } else if (isDefault === false) {
+      address.isDefault = false;
+    }
+
+    if (street !== undefined) address.street = street.trim();
+    if (landmark !== undefined) address.landmark = landmark.trim();
+    if (city !== undefined) address.city = city.trim();
+    if (state !== undefined) address.state = state.trim();
+    if (country !== undefined) address.country = country.trim();
+    if (pincode !== undefined) address.pincode = pincode.trim();
+    if (contact !== undefined) address.contact = contact.trim();
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Address updated successfully',
+      addresses: user.addresses
+    });
+  } catch (error) {
+    console.error('Error updating address:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update address',
+      error: error.message
+    });
+  }
 };
 
+// @desc    Delete shipping address
+// @route   DELETE /user/address/:id
+// @access  Protected
 exports.deleteAddress = async (req, res) => {
-  res.status(501).json({ message: 'Delete address endpoint not yet implemented' });
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    const address = user.addresses.id(id);
+    if (!address) {
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found'
+      });
+    }
+
+    user.addresses.pull(id);
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Address deleted successfully',
+      addresses: user.addresses
+    });
+  } catch (error) {
+    console.error('Error deleting address:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete address',
+      error: error.message
+    });
+  }
 };
 
 exports.getEnrolledCourses = async (req, res) => {

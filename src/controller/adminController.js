@@ -74,7 +74,8 @@ exports.createProduct = async (req, res) => {
       images,
       thumbnail,
       stock,
-      isAvailable
+      isAvailable,
+      varieties
     } = req.body;
 
     if (!title || price === undefined || price === null) {
@@ -92,8 +93,39 @@ exports.createProduct = async (req, res) => {
       });
     }
 
+    // Process varieties if provided
+    let cleanVarieties = [];
+    if (Array.isArray(varieties) && varieties.length > 0) {
+      cleanVarieties = varieties
+        .filter((v) => v && (v.name || v.sku))
+        .map((v) => ({
+          sku: (v.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`).trim(),
+          name: (v.name || 'Standard').trim(),
+          mrp: parseFloat(v.mrp || parsedPrice) || parsedPrice,
+          price: parseFloat(v.price || parsedPrice) || parsedPrice,
+          discountPercent: parseFloat(v.discountPercent) || 0,
+          stock: Math.max(0, parseInt(v.stock, 10) || 0),
+          minStockLevel: parseInt(v.minStockLevel, 10) || 10,
+          warehouseLocation: (v.warehouseLocation || 'WH-PRAYAG-B2').trim(),
+          image: (v.image || thumbnail || '').trim(),
+          isAvailable: v.isAvailable !== undefined ? Boolean(v.isAvailable) : (parseInt(v.stock, 10) || 0) > 0
+        }));
+    }
+
     const parsedStock = parseInt(stock, 10);
-    const initialStock = isNaN(parsedStock) ? 0 : Math.max(0, parsedStock);
+    let initialStock = cleanVarieties.length > 0
+      ? cleanVarieties.reduce((acc, v) => acc + v.stock, 0)
+      : (isNaN(parsedStock) ? 0 : Math.max(0, parsedStock));
+
+    // Gallery images processing
+    const cleanImages = Array.isArray(images)
+      ? images.map((img) => (typeof img === 'string' ? img.trim() : '')).filter(Boolean)
+      : (thumbnail ? [thumbnail.trim()] : []);
+
+    const mainThumbnail = thumbnail ? thumbnail.trim() : (cleanImages[0] || '');
+    if (mainThumbnail && !cleanImages.includes(mainThumbnail)) {
+      cleanImages.unshift(mainThumbnail);
+    }
 
     const newProduct = await Product.create({
       title: title.trim(),
@@ -101,10 +133,11 @@ exports.createProduct = async (req, res) => {
       price: parsedPrice,
       discountPrice: discountPrice !== undefined && discountPrice !== null && discountPrice !== '' ? parseFloat(discountPrice) : null,
       category: category ? category.trim() : 'General Wellness',
-      images: Array.isArray(images) ? images.filter(Boolean) : (thumbnail ? [thumbnail] : []),
-      thumbnail: thumbnail ? thumbnail.trim() : (Array.isArray(images) && images[0] ? images[0] : ''),
+      images: cleanImages,
+      thumbnail: mainThumbnail,
       stock: initialStock,
-      isAvailable: isAvailable !== undefined ? Boolean(isAvailable) : initialStock > 0
+      isAvailable: isAvailable !== undefined ? Boolean(isAvailable) : initialStock > 0,
+      varieties: cleanVarieties
     });
 
     return res.status(201).json({
@@ -141,9 +174,9 @@ exports.getAllProducts = async (req, res) => {
     if (stockFilter === 'outOfStock') {
       query.stock = { $lte: 0 };
     } else if (stockFilter === 'lowStock') {
-      query.stock = { $gt: 0, $lte: 5 };
+      query.stock = { $gt: 0, $lt: 10 };
     } else if (stockFilter === 'inStock') {
-      query.stock = { $gt: 5 };
+      query.stock = { $gte: 10 };
     }
 
     const products = await Product.find(query).sort({ createdAt: -1 });
@@ -152,7 +185,7 @@ exports.getAllProducts = async (req, res) => {
     const totalProducts = products.length;
     const totalUnits = products.reduce((acc, p) => acc + (p.stock || 0), 0);
     const outOfStockCount = products.filter((p) => p.stock <= 0).length;
-    const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= 5).length;
+    const lowStockCount = products.filter((p) => p.stock > 0 && p.stock < 10).length;
 
     return res.status(200).json({
       success: true,
@@ -230,11 +263,45 @@ exports.updateProduct = async (req, res) => {
     if (updates.discountPrice !== undefined && updates.discountPrice !== '') {
       updates.discountPrice = parseFloat(updates.discountPrice);
     }
-    if (updates.stock !== undefined) {
+
+    // Process varieties if provided
+    if (Array.isArray(updates.varieties)) {
+      updates.varieties = updates.varieties
+        .filter((v) => v && (v.name || v.sku))
+        .map((v) => ({
+          sku: (v.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`).trim(),
+          name: (v.name || 'Standard').trim(),
+          mrp: parseFloat(v.mrp || updates.price || 0) || 0,
+          price: parseFloat(v.price || updates.price || 0) || 0,
+          discountPercent: parseFloat(v.discountPercent) || 0,
+          stock: Math.max(0, parseInt(v.stock, 10) || 0),
+          minStockLevel: parseInt(v.minStockLevel, 10) || 10,
+          warehouseLocation: (v.warehouseLocation || 'WH-PRAYAG-B2').trim(),
+          image: (v.image || updates.thumbnail || '').trim(),
+          isAvailable: v.isAvailable !== undefined ? Boolean(v.isAvailable) : (parseInt(v.stock, 10) || 0) > 0
+        }));
+
+      if (updates.varieties.length > 0) {
+        updates.stock = updates.varieties.reduce((acc, v) => acc + v.stock, 0);
+        if (updates.isAvailable === undefined) {
+          updates.isAvailable = updates.stock > 0;
+        }
+      }
+    }
+
+    if (updates.stock !== undefined && (!updates.varieties || updates.varieties.length === 0)) {
       updates.stock = Math.max(0, parseInt(updates.stock, 10));
       // Auto-toggle isAvailable if stock reaches 0 unless explicitly set
       if (updates.isAvailable === undefined) {
         updates.isAvailable = updates.stock > 0;
+      }
+    }
+
+    // Gallery images processing
+    if (Array.isArray(updates.images)) {
+      updates.images = updates.images.map((img) => (typeof img === 'string' ? img.trim() : '')).filter(Boolean);
+      if (updates.thumbnail && !updates.images.includes(updates.thumbnail)) {
+        updates.images.unshift(updates.thumbnail.trim());
       }
     }
 
