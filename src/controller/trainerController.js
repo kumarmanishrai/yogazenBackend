@@ -8,6 +8,7 @@ const {
   setTokenCookies,
   clearTokenCookies
 } = require('../helper/generateToken');
+const { logAuthEvent } = require('../services/auditLogger');
 
 // @desc    Register a new trainer (email & password only)
 // @route   POST /trainer/register
@@ -58,6 +59,12 @@ exports.register = async (req, res) => {
 
     setTokenCookies(res, accessToken, refreshToken);
 
+    logAuthEvent(req, {
+      actor: { id: newTrainer._id, email: newTrainer.email, role: 'trainer' },
+      action: 'AUTH_REGISTER',
+      status: 'SUCCESS'
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Trainer registered successfully. Complete your profile anytime.',
@@ -104,6 +111,13 @@ exports.login = async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
     const trainer = await Trainer.findOne({ email: normalizedEmail });
     if (!trainer) {
+      logAuthEvent(req, {
+        actor: { email: normalizedEmail, role: 'trainer' },
+        action: 'AUTH_LOGIN_FAILED',
+        status: 'FAILURE',
+        severity: 'warning',
+        details: { reason: 'Trainer account not found' }
+      });
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -112,6 +126,13 @@ exports.login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, trainer.password);
     if (!isMatch) {
+      logAuthEvent(req, {
+        actor: { id: trainer._id, email: trainer.email, name: trainer.name, role: 'trainer' },
+        action: 'AUTH_LOGIN_FAILED',
+        status: 'FAILURE',
+        severity: 'warning',
+        details: { reason: 'Incorrect password' }
+      });
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -130,6 +151,12 @@ exports.login = async (req, res) => {
     await trainer.save();
 
     setTokenCookies(res, accessToken, refreshToken);
+
+    await logAuthEvent(req, {
+      actor: { id: trainer._id, email: trainer.email, name: trainer.name, role: 'trainer' },
+      action: 'AUTH_LOGIN',
+      status: 'SUCCESS'
+    });
 
     return res.status(200).json({
       success: true,
@@ -233,13 +260,51 @@ exports.refreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const incomingRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    let actorTrainer = null;
 
     if (incomingRefreshToken) {
-      await Trainer.findOneAndUpdate(
+      actorTrainer = await Trainer.findOneAndUpdate(
         { refreshTokens: incomingRefreshToken },
         { $pull: { refreshTokens: incomingRefreshToken } }
       );
     }
+
+    if (!actorTrainer && req.headers?.authorization?.startsWith('Bearer ')) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        if (decoded?.id) {
+          actorTrainer = await Trainer.findById(decoded.id);
+        }
+      } catch (e) {}
+    }
+
+    if (!actorTrainer && (req.body?.email || req.body?.id || req.body?.trainerId)) {
+      const email = req.body.email ? req.body.email.toLowerCase().trim() : undefined;
+      const id = req.body.id || req.body.trainerId;
+      actorTrainer = await Trainer.findOne({
+        $or: [
+          ...(email ? [{ email }] : []),
+          ...(id ? [{ _id: id }] : [])
+        ]
+      });
+    }
+
+    if (!actorTrainer && req.trainer) {
+      actorTrainer = req.trainer;
+    }
+
+    await logAuthEvent(req, {
+      actor: {
+        id: actorTrainer?._id,
+        email: actorTrainer?.email || req.body?.email || 'trainer@yogazen',
+        name: actorTrainer?.name || 'Trainer',
+        role: 'trainer'
+      },
+      action: 'AUTH_LOGOUT',
+      status: 'SUCCESS',
+      details: { reason: 'Trainer initiated logout' }
+    });
 
     clearTokenCookies(res);
 
@@ -249,10 +314,10 @@ exports.logout = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in trainer logout:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error during logout',
-      error: error.message
+    clearTokenCookies(res);
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out'
     });
   }
 };
@@ -384,6 +449,33 @@ exports.getMyCourses = async (req, res) => {
   }
 };
 
+// @desc    Get a single course owned by trainer
+// @route   GET /trainer/courses/:id
+// @access  Protected (Trainer)
+exports.getCourseById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id }).populate('trainer', 'name email contact bio categories experienceYears');
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      course
+    });
+  } catch (error) {
+    console.error('Error retrieving trainer course by ID:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve course details',
+      error: error.message
+    });
+  }
+};
+
 // @desc    Create a new course (STRICT PROFILE COMPLETION GUARD)
 // @route   POST /trainer/courses
 // @access  Protected (Trainer)
@@ -408,7 +500,7 @@ exports.createCourse = async (req, res) => {
       return res.status(403).json({
         success: false,
         code: 'PROFILE_INCOMPLETE',
-        message: 'Action blocked: Please complete your trainer profile (name, contact number, bio, and teaching categories) before adding or publishing courses.'
+        message: 'Action blocked: Please complete your trainer profile (name, contact number, bio, and training categories) before adding or publishing courses.'
       });
     }
 
@@ -449,12 +541,353 @@ exports.createCourse = async (req, res) => {
   }
 };
 
-exports.updateCourse = async (req, res) => {
-  res.status(501).json({ message: 'Update course endpoint not yet implemented' });
+// Helper to extract YouTube Video/Live ID
+const extractYouTubeId = (url) => {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const match = trimmed.match(regExp);
+  return match ? match[1] : '';
 };
 
+// @desc    Update course details
+// @route   PUT /trainer/courses/:id
+// @access  Protected (Trainer)
+exports.updateCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id });
+
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    const { title, description, category, level, price, duration, thumbnail } = req.body;
+    if (title !== undefined) course.title = title.trim();
+    if (description !== undefined) course.description = description.trim();
+    if (category !== undefined) course.category = category.trim();
+    if (level !== undefined) course.level = level;
+    if (price !== undefined) course.price = Math.max(0, parseFloat(price) || 0);
+    if (duration !== undefined) course.duration = duration;
+    if (thumbnail !== undefined) course.thumbnail = thumbnail;
+
+    await course.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Course updated successfully',
+      course
+    });
+  } catch (error) {
+    console.error('Error updating course:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update course',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Delete course
+// @route   DELETE /trainer/courses/:id
+// @access  Protected (Trainer)
 exports.deleteCourse = async (req, res) => {
-  res.status(501).json({ message: 'Delete course endpoint not yet implemented' });
+  try {
+    const { id } = req.params;
+    const course = await Course.findOneAndDelete({ _id: id, trainer: req.trainer._id });
+
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    // Remove from trainer's courses list
+    await Trainer.findByIdAndUpdate(req.trainer._id, {
+      $pull: { courses: id }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Course deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting course:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete course',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Add a new class to an existing course
+// @route   POST /trainer/courses/:id/classes
+// @access  Protected (Trainer)
+exports.addClassToCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id });
+
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    const {
+      title,
+      description,
+      duration = '45 mins',
+      scheduledAt,
+      type = 'Live Stream',
+      meetingUrl = '',
+      videoUrl = '',
+      youtubeVideoId = ''
+    } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Class title is required'
+      });
+    }
+
+    if (scheduledAt) {
+      const scheduledDate = new Date(scheduledAt);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid scheduled date and time'
+        });
+      }
+      // Cannot schedule in the past (allow 3 min grace for latency)
+      if (scheduledDate < new Date(Date.now() - 3 * 60 * 1000)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class scheduled date and time cannot be in the past'
+        });
+      }
+    }
+
+    const resolvedYouTubeId = youtubeVideoId || extractYouTubeId(videoUrl || meetingUrl);
+
+    const newClass = {
+      title: title.trim(),
+      description: (description || '').trim(),
+      duration: duration || '45 mins',
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 24 * 60 * 60 * 1000),
+      type: type || 'Live Stream',
+      meetingUrl: meetingUrl.trim(),
+      videoUrl: videoUrl.trim() || meetingUrl.trim(),
+      youtubeVideoId: resolvedYouTubeId,
+      status: 'scheduled',
+      isLive: false,
+      recordingUrl: ''
+    };
+
+    course.classes.push(newClass);
+    await course.save();
+
+    const addedClass = course.classes[course.classes.length - 1];
+
+    return res.status(201).json({
+      success: true,
+      message: 'Class added to course successfully',
+      course,
+      class: addedClass
+    });
+  } catch (error) {
+    console.error('Error adding class to course:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to add class',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Update a class within a course
+// @route   PUT /trainer/courses/:id/classes/:classId
+// @access  Protected (Trainer)
+exports.updateClass = async (req, res) => {
+  try {
+    const { id, classId } = req.params;
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id });
+
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    const targetClass = course.classes.id(classId) || course.classes.find(c => c._id.toString() === classId);
+    if (!targetClass) {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found in this course'
+      });
+    }
+
+    const {
+      title,
+      description,
+      duration,
+      scheduledAt,
+      type,
+      meetingUrl,
+      videoUrl,
+      youtubeVideoId,
+      recordingUrl
+    } = req.body;
+
+    if (title !== undefined) targetClass.title = title.trim();
+    if (description !== undefined) targetClass.description = description.trim();
+    if (duration !== undefined) targetClass.duration = duration;
+    if (scheduledAt !== undefined) {
+      const scheduledDate = new Date(scheduledAt);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid scheduled date and time'
+        });
+      }
+      if (scheduledDate < new Date(Date.now() - 3 * 60 * 1000)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class scheduled date and time cannot be in the past'
+        });
+      }
+      targetClass.scheduledAt = scheduledDate;
+    }
+    if (type !== undefined) targetClass.type = type;
+    if (meetingUrl !== undefined) targetClass.meetingUrl = meetingUrl.trim();
+    if (videoUrl !== undefined) targetClass.videoUrl = videoUrl.trim();
+    if (recordingUrl !== undefined) targetClass.recordingUrl = recordingUrl.trim();
+
+    const ytId = youtubeVideoId || extractYouTubeId(targetClass.videoUrl || targetClass.meetingUrl);
+    if (ytId) targetClass.youtubeVideoId = ytId;
+
+    await course.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Class updated successfully',
+      course,
+      class: targetClass
+    });
+  } catch (error) {
+    console.error('Error updating class:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update class',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Delete a class from a course
+// @route   DELETE /trainer/courses/:id/classes/:classId
+// @access  Protected (Trainer)
+exports.deleteClass = async (req, res) => {
+  try {
+    const { id, classId } = req.params;
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id });
+
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    course.classes = course.classes.filter(
+      (cls) => (cls._id ? cls._id.toString() : cls.id) !== classId
+    );
+    await course.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Class deleted successfully',
+      course
+    });
+  } catch (error) {
+    console.error('Error deleting class:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete class',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Set Class Live Status (Trainer Starts / Ends Live Stream)
+// @route   PUT /trainer/courses/:id/classes/:classId/live-status
+// @access  Protected (Trainer)
+exports.updateClassLiveStatus = async (req, res) => {
+  try {
+    const { id, classId } = req.params;
+    const { isLive, youtubeVideoId, videoUrl } = req.body;
+
+    const course = await Course.findOne({ _id: id, trainer: req.trainer._id });
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found or unauthorized'
+      });
+    }
+
+    const targetClass = course.classes.id(classId) || course.classes.find(c => c._id.toString() === classId);
+    if (!targetClass) {
+      return res.status(404).json({
+        success: false,
+        message: 'Class not found in this course'
+      });
+    }
+
+    if (isLive === true) {
+      // Start live stream
+      targetClass.isLive = true;
+      targetClass.status = 'live';
+      targetClass.startedAt = new Date();
+      if (videoUrl) targetClass.videoUrl = videoUrl.trim();
+      const ytId = youtubeVideoId || extractYouTubeId(videoUrl || targetClass.videoUrl || targetClass.meetingUrl);
+      if (ytId) targetClass.youtubeVideoId = ytId;
+    } else {
+      // End live stream & archive as recorded session
+      targetClass.isLive = false;
+      targetClass.status = 'completed';
+      targetClass.endedAt = new Date();
+      if (videoUrl) {
+        targetClass.recordingUrl = videoUrl.trim();
+      } else if (targetClass.youtubeVideoId) {
+        targetClass.recordingUrl = `https://www.youtube.com/watch?v=${targetClass.youtubeVideoId}`;
+      }
+    }
+
+    await course.save();
+
+    return res.status(200).json({
+      success: true,
+      message: isLive ? 'Class is now LIVE! Students can join stream.' : 'Live stream ended. Class saved to recordings.',
+      course,
+      class: targetClass
+    });
+  } catch (error) {
+    console.error('Error updating live status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update class live status',
+      error: error.message
+    });
+  }
 };
 
 // Public discovery route: list approved trainers with category filtering

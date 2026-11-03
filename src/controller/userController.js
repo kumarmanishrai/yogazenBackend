@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/userSchema');
+const Course = require('../models/courseSchema');
+const Order = require('../models/orderSchema');
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -7,6 +9,7 @@ const {
   setTokenCookies,
   clearTokenCookies
 } = require('../helper/generateToken');
+const { logAuthEvent } = require('../services/auditLogger');
 
 // @desc    Register a new user (email & password only)
 // @route   POST /user/register
@@ -58,6 +61,12 @@ exports.register = async (req, res) => {
     // Store tokens in HTTP-Only cookies
     setTokenCookies(res, accessToken, refreshToken);
 
+    logAuthEvent(req, {
+      actor: { id: newUser._id, email: newUser.email, role: 'user' },
+      action: 'AUTH_REGISTER',
+      status: 'SUCCESS'
+    });
+
     return res.status(201).json({
       success: true,
       message: 'User registered successfully. Complete your profile anytime.',
@@ -99,6 +108,13 @@ exports.login = async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
+      logAuthEvent(req, {
+        actor: { email: normalizedEmail, role: 'user' },
+        action: 'AUTH_LOGIN_FAILED',
+        status: 'FAILURE',
+        severity: 'warning',
+        details: { reason: 'User account not found' }
+      });
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -107,6 +123,13 @@ exports.login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      logAuthEvent(req, {
+        actor: { id: user._id, email: user.email, name: user.name, role: 'user' },
+        action: 'AUTH_LOGIN_FAILED',
+        status: 'FAILURE',
+        severity: 'warning',
+        details: { reason: 'Incorrect password' }
+      });
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -126,6 +149,12 @@ exports.login = async (req, res) => {
 
     // Set HTTP-Only cookies
     setTokenCookies(res, accessToken, refreshToken);
+
+    await logAuthEvent(req, {
+      actor: { id: user._id, email: user.email, name: user.name, role: 'user' },
+      action: 'AUTH_LOGIN',
+      status: 'SUCCESS'
+    });
 
     return res.status(200).json({
       success: true,
@@ -225,13 +254,51 @@ exports.refreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const incomingRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    let actorUser = null;
 
     if (incomingRefreshToken) {
-      await User.findOneAndUpdate(
+      actorUser = await User.findOneAndUpdate(
         { refreshTokens: incomingRefreshToken },
         { $pull: { refreshTokens: incomingRefreshToken } }
       );
     }
+
+    if (!actorUser && req.headers?.authorization?.startsWith('Bearer ')) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        if (decoded?.id) {
+          actorUser = await User.findById(decoded.id);
+        }
+      } catch (e) {}
+    }
+
+    if (!actorUser && (req.body?.email || req.body?.id || req.body?.userId)) {
+      const email = req.body.email ? req.body.email.toLowerCase().trim() : undefined;
+      const id = req.body.id || req.body.userId;
+      actorUser = await User.findOne({
+        $or: [
+          ...(email ? [{ email }] : []),
+          ...(id ? [{ _id: id }] : [])
+        ]
+      });
+    }
+
+    if (!actorUser && req.user) {
+      actorUser = req.user;
+    }
+
+    await logAuthEvent(req, {
+      actor: {
+        id: actorUser?._id,
+        email: actorUser?.email || req.body?.email || 'user@yogazen',
+        name: actorUser?.name || 'User',
+        role: 'user'
+      },
+      action: 'AUTH_LOGOUT',
+      status: 'SUCCESS',
+      details: { reason: 'User initiated logout' }
+    });
 
     clearTokenCookies(res);
 
@@ -241,10 +308,10 @@ exports.logout = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in user logout:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error during logout',
-      error: error.message
+    clearTokenCookies(res);
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out'
     });
   }
 };
@@ -436,7 +503,54 @@ exports.deleteAddress = async (req, res) => {
 };
 
 exports.getEnrolledCourses = async (req, res) => {
-  res.status(501).json({ message: 'Get enrolled courses endpoint not yet implemented' });
+  try {
+    const user = await User.findById(req.user._id).populate({
+      path: 'enrolledCourses.course',
+      populate: { path: 'trainer', select: 'name bio categories experienceYears' }
+    });
+
+    let enrolledList = (user?.enrolledCourses || []).filter((e) => Boolean(e.course));
+
+    // Also look for course orders to ensure full consistency across all enrollments
+    const courseOrders = await Order.find({
+      user: req.user._id,
+      orderType: 'course',
+      status: { $ne: 'Cancelled' }
+    });
+
+    const enrolledCourseIds = new Set(
+      enrolledList.map((e) => (e.course?._id || e.course).toString())
+    );
+
+    for (const order of courseOrders) {
+      const cId = order.courseDetails?.course;
+      if (cId && !enrolledCourseIds.has(cId.toString())) {
+        const fullCourse = await Course.findById(cId).populate('trainer', 'name bio categories experienceYears');
+        if (fullCourse) {
+          enrolledList.push({
+            course: fullCourse,
+            enrolledOn: order.createdAt,
+            invoiceId: order.invoiceId,
+            orderId: order._id,
+            progress: order.courseProgress?.progressPercentage || 0
+          });
+          enrolledCourseIds.add(cId.toString());
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      enrolledCourses: enrolledList
+    });
+  } catch (error) {
+    console.error('Error fetching enrolled courses:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve enrolled courses',
+      error: error.message
+    });
+  }
 };
 
 exports.getInvoice = async (req, res) => {

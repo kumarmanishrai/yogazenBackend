@@ -3,14 +3,14 @@ const jwt = require('jsonwebtoken');
 const getAccessSecret = () => process.env.ACCESS_TOKEN_SECRET || 'yogazen_access_secret_development_2026_xyz';
 const getRefreshSecret = () => process.env.REFRESH_TOKEN_SECRET || 'yogazen_refresh_secret_development_2026_abc';
 
-const ACCESS_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
+const ACCESS_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || '7d';
 const REFRESH_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '60d';
 
 // Durations in milliseconds for cookies
-const ACCESS_COOKIE_MAX_AGE = 15 * 60 * 1000; // 15 minutes
+const ACCESS_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 const REFRESH_COOKIE_MAX_AGE = 60 * 24 * 60 * 60 * 1000; // 60 days (~2 months)
 
-// Generate Access Token (15 mins)
+// Generate Access Token (7 days)
 const generateAccessToken = (payload) => {
   return jwt.sign(payload, getAccessSecret(), { expiresIn: ACCESS_EXPIRES_IN });
 };
@@ -47,7 +47,7 @@ const getCookieOptions = () => {
 const setTokenCookies = (res, accessToken, refreshToken) => {
   const baseCookieOptions = getCookieOptions();
 
-  // 15 minutes for access token cookie
+  // 7 days for access token cookie
   res.cookie('accessToken', accessToken, {
     ...baseCookieOptions,
     maxAge: ACCESS_COOKIE_MAX_AGE

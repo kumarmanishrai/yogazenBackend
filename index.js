@@ -4,6 +4,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const mongo = require('./src/db/mongo');
+const seedSuperAdmin = require('./src/helper/seedSuperAdmin');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -13,6 +14,7 @@ const adminRoute = require('./src/routes/adminRoute');
 const cartRoute = require('./src/routes/cartRoute');
 const wishlistRoute = require('./src/routes/wishlistRoute');
 const productRoute = require('./src/routes/productRoute');
+const courseRoute = require('./src/routes/courseRoute');
 const orderRoute = require('./src/routes/orderRoute');
 const complaintRoute = require('./src/routes/complaintRoute');
 const analyticsRoute = require('./src/routes/analyticsRoute');
@@ -31,6 +33,7 @@ app.use(cors({
 mongo.on('error', console.error.bind(console, "Couldn't connect mongodb to server"));
 mongo.once('open', () => {
   console.log('MongoDB connected successfully');
+  seedSuperAdmin();
 });
 
 app.get('/check', (req, res) => {
@@ -50,6 +53,9 @@ app.use('/user/wishlist', wishlistRoute);
 
 // Products route (Public Store)
 app.use('/products', productRoute);
+
+// Courses route (Public Catalog & Reviews)
+app.use('/courses', courseRoute);
 
 // Orders route
 app.use('/orders', orderRoute);

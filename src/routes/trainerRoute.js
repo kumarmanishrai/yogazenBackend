@@ -19,8 +19,15 @@ router.get('/earnings', isValidTrainer, trainerController.getEarnings);
 
 // --- Protected Course Management Routes ---
 router.get('/courses', isValidTrainer, trainerController.getMyCourses);
+router.get('/courses/:id', isValidTrainer, trainerController.getCourseById);
 router.post('/courses', isValidTrainer, trainerController.createCourse);
 router.put('/courses/:id', isValidTrainer, trainerController.updateCourse);
 router.delete('/courses/:id', isValidTrainer, trainerController.deleteCourse);
+
+// --- Protected Course Classes & Live Streaming Routes ---
+router.post('/courses/:id/classes', isValidTrainer, trainerController.addClassToCourse);
+router.put('/courses/:id/classes/:classId', isValidTrainer, trainerController.updateClass);
+router.delete('/courses/:id/classes/:classId', isValidTrainer, trainerController.deleteClass);
+router.put('/courses/:id/classes/:classId/live-status', isValidTrainer, trainerController.updateClassLiveStatus);
 
 module.exports = router;

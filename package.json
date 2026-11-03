@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "ml:start": "PYTHONPATH=../YogaZen-Recommendation-System/pylibs python3 -m uvicorn app:app --app-dir ../YogaZen-Recommendation-System/extracted/YogaZen_Recommendation_Project --host 127.0.0.1 --port 8000",
+    "ml:train": "PYTHONPATH=../YogaZen-Recommendation-System/pylibs python3 ../YogaZen-Recommendation-System/extracted/YogaZen_Recommendation_Project/train_model.py"
   },
   "keywords": [],
   "author": "",

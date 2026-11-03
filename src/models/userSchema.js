@@ -108,6 +108,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
     addresses: [addressSchema],
     cart: [cartItemSchema],
     wishlist: [wishlistItemSchema],

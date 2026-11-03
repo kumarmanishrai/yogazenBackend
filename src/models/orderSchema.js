@@ -101,6 +101,27 @@ const orderSchema = new mongoose.Schema(
     },
     // For Yoga course orders
     courseDetails: courseItemSchema,
+    courseProgress: {
+      completedClasses: [{ type: String }],
+      progressPercentage: { type: Number, default: 0 }
+    },
+    subtotal: {
+      type: Number,
+      default: 0
+    },
+    couponCode: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    discountAmount: {
+      type: Number,
+      default: 0
+    },
+    shippingFee: {
+      type: Number,
+      default: 0
+    },
     totalAmount: {
       type: Number,
       required: true,
@@ -120,10 +141,36 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: 'Online / Card / UPI'
     },
+    courierName: {
+      type: String,
+      trim: true,
+      default: ''
+    },
     trackingNumber: {
       type: String,
       trim: true,
       default: ''
+    },
+    cancellationReason: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    cancelledAt: {
+      type: Date
+    },
+    returnStatus: {
+      type: String,
+      enum: ['None', 'Requested', 'Approved', 'Rejected', 'Completed'],
+      default: 'None'
+    },
+    returnReason: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    returnedAt: {
+      type: Date
     },
     deliveredAt: {
       type: Date
@@ -132,5 +179,58 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Order', orderSchema);
+const couponSchema = new mongoose.Schema(
+  {
+    code: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true
+    },
+    discountType: {
+      type: String,
+      enum: ['percent', 'flat', 'shipping'],
+      default: 'percent'
+    },
+    discountValue: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    minOrderValue: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    maxDiscount: {
+      type: Number,
+      default: null
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    usageCount: {
+      type: Number,
+      default: 0
+    },
+    expiresAt: {
+      type: Date,
+      default: null
+    }
+  },
+  { timestamps: true }
+);
+
+const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
+const Coupon = mongoose.models.Coupon || mongoose.model('Coupon', couponSchema);
+
+Order.Coupon = Coupon;
+module.exports = Order;
 

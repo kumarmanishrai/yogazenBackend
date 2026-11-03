@@ -60,6 +60,14 @@ exports.getProducts = async (req, res) => {
       query.stock = { $gt: 0 };
     }
 
+    // Minimum customer rating filter
+    if (req.query.minRating) {
+      const minRat = parseFloat(req.query.minRating);
+      if (!isNaN(minRat) && minRat > 0) {
+        query.rating = { $gte: minRat };
+      }
+    }
+
     // Sorting
     let sortOptions = { createdAt: -1 }; // default: newest
     if (sort === 'price_asc') {
@@ -274,7 +282,7 @@ exports.addReview = async (req, res) => {
       });
     }
 
-    const reviewerName = (name || req.user?.name || req.user?.email?.split('@')[0] || 'Mindful Practitioner').trim();
+    const reviewerName = (name || req.user?.name || req.user?.email || 'customer@yogazen.com').trim();
 
     const newReview = {
       user: req.user?._id || null,

@@ -1,5 +1,6 @@
 const UserActivity = require('../models/userActivitySchema');
 const Product = require('../models/productSchema');
+const mlRecommendationService = require('../services/mlRecommendationService');
 
 // Event implicit score weights for ML training
 const EVENT_WEIGHTS = {
@@ -155,48 +156,27 @@ exports.exportDataset = async (req, res) => {
   }
 };
 
-// 3. Recommendation Gateway (Safe stub until friend's ML API is ready)
+// 3. Recommendation Gateway (Powered by Hybrid ML Model from YogaZen-Recommendation-System)
 exports.getRecommendations = async (req, res) => {
   try {
-    // Check if external ML service is explicitly configured and ready
-    const isMlReady = process.env.ENABLE_EXTERNAL_ML === 'true' && Boolean(process.env.ML_SERVICE_URL);
+    const userId = req.user?._id || req.query.userId || null;
+    const sessionId = req.query.sessionId || 'anonymous_session';
+    const limit = parseInt(req.query.limit, 10) || 6;
 
-    if (!isMlReady) {
-      // Model not prepared yet: strictly do NOT make failing external calls
-      return res.status(200).json({
-        success: true,
-        enabled: false,
-        message: 'ML recommendation engine is training / not live yet. Real-time telemetry is accumulating.',
-        products: []
-      });
-    }
-
-    /*
-     * WHEN THE FRIEND'S ML MODEL IS HOSTED & READY:
-     * Set ENABLE_EXTERNAL_ML=true and ML_SERVICE_URL=https://... in .env
-     *
-     * Example:
-     * const mlResponse = await fetch(`${process.env.ML_SERVICE_URL}/predict`, {
-     *   method: 'POST',
-     *   headers: { 'Content-Type': 'application/json' },
-     *   body: JSON.stringify({ userId: req.user?._id, sessionId: req.query.sessionId })
-     * });
-     * const { recommendedProductIds } = await mlResponse.json();
-     * const products = await Product.find({ _id: { $in: recommendedProductIds } });
-     * return res.json({ success: true, enabled: true, products });
-     */
-
-    return res.status(200).json({
-      success: true,
-      enabled: false,
-      products: []
+    const result = await mlRecommendationService.getRecommendationsForUser({
+      userId,
+      sessionId,
+      limit
     });
+
+    return res.status(200).json(result);
   } catch (error) {
     console.error('Error in getRecommendations gateway:', error);
     return res.status(200).json({
       success: true,
-      enabled: false,
-      products: []
+      count: 0,
+      products: [],
+      error: error.message
     });
   }
 };

@@ -162,7 +162,9 @@ productSchema.pre('save', function (next) {
   if (this.varieties && this.varieties.length > 0) {
     this.stock = this.varieties.reduce((acc, v) => acc + (v.stock || 0), 0);
   }
-  next();
+  if (typeof next === 'function') {
+    return next();
+  }
 });
 
 productSchema.set('toJSON', { virtuals: true });

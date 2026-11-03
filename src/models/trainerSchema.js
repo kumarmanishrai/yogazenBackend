@@ -46,6 +46,18 @@ const trainerSchema = new mongoose.Schema(
       type: Boolean,
       default: false // Admin approves trainer before their courses go public
     },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false
+    },
+    commissionRate: {
+      type: Number,
+      default: 20 // 20% platform commission
+    },
     // Payout details to receive course revenue
     payoutDetails: {
       accountHolderName: { type: String, trim: true },

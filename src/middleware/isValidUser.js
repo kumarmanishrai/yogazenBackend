@@ -34,14 +34,16 @@ const isValidUser = async (req, res, next) => {
       });
     }
 
-    if (decoded.role !== 'user') {
-      return res.status(403).json({
-        success: false,
-        message: 'Forbidden. Access restricted to regular users.'
-      });
+    let user = await User.findById(decoded.id).select('-password');
+    if (!user) {
+      const Trainer = require('../models/trainerSchema');
+      user = await Trainer.findById(decoded.id).select('-password');
+    }
+    if (!user) {
+      const Admin = require('../models/adminSchema');
+      user = await Admin.findById(decoded.id).select('-password');
     }
 
-    const user = await User.findById(decoded.id).select('-password');
     if (!user) {
       return res.status(401).json({
         success: false,
