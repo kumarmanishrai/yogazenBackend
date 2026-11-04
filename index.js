@@ -23,8 +23,21 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+const allowedOrigins = [
+  'https://yogazen-web.netlify.app',
+  'http://localhost:3000',
+  ...(process.env.URL ? [process.env.URL.trim()] : [])
+];
+
 app.use(cors({
-  origin: process.env.URL || 'http://localhost:3000',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl) or if in whitelist
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS policy'));
+    }
+  },
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
