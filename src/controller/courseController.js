@@ -581,6 +581,23 @@ exports.enrollInCourse = async (req, res) => {
       });
     }
 
+    // Check if user is the trainer of this course (Instructors cannot buy their own course)
+    const courseTrainerId = course.trainer?._id ? course.trainer._id.toString() : (course.trainer ? course.trainer.toString() : '');
+    const currentUserId = user._id ? user._id.toString() : '';
+    const currentUserEmail = user.email ? user.email.toLowerCase().trim() : '';
+    const courseTrainerEmail = course.trainer?.email ? course.trainer.email.toLowerCase().trim() : '';
+
+    if (
+      (courseTrainerId && courseTrainerId === currentUserId) ||
+      (courseTrainerEmail && courseTrainerEmail === currentUserEmail) ||
+      (user.role === 'trainer' && courseTrainerId === currentUserId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are the instructor of this course. Instructors cannot purchase or enroll in their own courses.'
+      });
+    }
+
     // Check if already enrolled
     const alreadyEnrolled = (user.enrolledCourses || []).some(
       (e) => e.course && e.course.toString() === course._id.toString()

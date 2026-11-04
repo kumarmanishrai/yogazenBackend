@@ -509,14 +509,34 @@ exports.getEnrolledCourses = async (req, res) => {
       populate: { path: 'trainer', select: 'name bio categories experienceYears' }
     });
 
-    let enrolledList = (user?.enrolledCourses || []).filter((e) => Boolean(e.course));
-
     // Also look for course orders to ensure full consistency across all enrollments
     const courseOrders = await Order.find({
       user: req.user._id,
       orderType: 'course',
       status: { $ne: 'Cancelled' }
     });
+
+    const orderMap = new Map();
+    for (const order of courseOrders) {
+      if (order.courseDetails?.course) {
+        orderMap.set(order.courseDetails.course.toString(), order);
+      }
+    }
+
+    let enrolledList = (user?.enrolledCourses || [])
+      .filter((e) => Boolean(e.course))
+      .map((e) => {
+        const cId = (e.course?._id || e.course).toString();
+        const matchingOrder = orderMap.get(cId);
+        const eObj = e.toObject ? e.toObject() : { ...e };
+        if (matchingOrder) {
+          eObj.orderId = matchingOrder._id;
+          eObj.invoiceId = matchingOrder.invoiceId || eObj.invoiceId;
+          eObj.progress = matchingOrder.courseProgress?.progressPercentage ?? eObj.progress ?? 0;
+          eObj.completedClasses = matchingOrder.courseProgress?.completedClasses || eObj.completedClasses || [];
+        }
+        return eObj;
+      });
 
     const enrolledCourseIds = new Set(
       enrolledList.map((e) => (e.course?._id || e.course).toString())
@@ -532,7 +552,8 @@ exports.getEnrolledCourses = async (req, res) => {
             enrolledOn: order.createdAt,
             invoiceId: order.invoiceId,
             orderId: order._id,
-            progress: order.courseProgress?.progressPercentage || 0
+            progress: order.courseProgress?.progressPercentage || 0,
+            completedClasses: order.courseProgress?.completedClasses || []
           });
           enrolledCourseIds.add(cId.toString());
         }

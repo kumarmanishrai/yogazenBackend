@@ -461,7 +461,87 @@ exports.updateCourseProgress = async (req, res) => {
     const { id } = req.params;
     let { classId, totalClasses = 5, completedClasses, progressPercentage } = req.body;
 
-    const order = await Order.findOne({ _id: id, user: req.user._id, orderType: 'course' });
+    let order = null;
+    const courseId = req.body?.courseId;
+    const isObjectId = mongoose.Types.ObjectId.isValid(id);
+
+    if (isObjectId) {
+      order = await Order.findOne({
+        user: req.user._id,
+        $or: [
+          { _id: id },
+          { 'courseDetails.course': id }
+        ]
+      });
+    }
+
+    if (!order) {
+      order = await Order.findOne({
+        user: req.user._id,
+        $or: [
+          { invoiceId: id },
+          { 'courseDetails.course': id }
+        ]
+      });
+    }
+
+    if (!order && courseId) {
+      const isCourseObjId = mongoose.Types.ObjectId.isValid(courseId);
+      order = await Order.findOne({
+        user: req.user._id,
+        $or: [
+          { 'courseDetails.course': courseId },
+          ...(isCourseObjId ? [{ _id: courseId }] : [])
+        ]
+      });
+    }
+
+    // Fallback: Check if user is enrolled in User.enrolledCourses and auto-link/create course order
+    if (!order) {
+      const User = require('../models/userSchema');
+      const user = await User.findById(req.user._id);
+      const enrolledItem = user?.enrolledCourses?.find((e) => {
+        const cId = (e.course?._id || e.course)?.toString();
+        const sId = e._id?.toString();
+        const invId = e.invoiceId?.toString();
+        return (
+          cId === String(id) ||
+          sId === String(id) ||
+          invId === String(id) ||
+          (courseId && (cId === String(courseId) || sId === String(courseId)))
+        );
+      });
+
+      if (enrolledItem) {
+        const resolvedCourseId = enrolledItem.course?._id || enrolledItem.course;
+        order = await Order.findOne({
+          user: req.user._id,
+          'courseDetails.course': resolvedCourseId
+        });
+
+        if (!order) {
+          order = new Order({
+            user: req.user._id,
+            orderNumber: `YZ-ORD-CRS-${Math.floor(10000 + Math.random() * 90000)}`,
+            invoiceId: enrolledItem.invoiceId || `YZ-INV-${Math.floor(10000 + Math.random() * 90000)}`,
+            orderType: 'course',
+            courseDetails: {
+              course: resolvedCourseId,
+              title: 'Yoga Course Curriculum'
+            },
+            courseProgress: {
+              completedClasses: [],
+              progressPercentage: 0
+            },
+            totalAmount: enrolledItem.amountPaid || 0,
+            status: 'Active',
+            paymentStatus: 'Paid'
+          });
+          await order.save();
+        }
+      }
+    }
+
     if (!order) {
       return res.status(404).json({
         success: false,
