@@ -260,6 +260,21 @@ exports.createOrder = async (req, res) => {
           }
         }
       }
+
+      // Remove purchased products from user's active cart in database
+      const purchasedProductIds = items.map(it => (it.product?._id || it.product)?.toString()).filter(Boolean);
+      if (purchasedProductIds.length > 0) {
+        await User.updateOne(
+          { _id: userId },
+          {
+            $pull: {
+              cart: {
+                product: { $in: purchasedProductIds }
+              }
+            }
+          }
+        );
+      }
     }
 
     // If course order, register enrollment for user and trainer
